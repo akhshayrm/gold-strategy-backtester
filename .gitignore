@@ -1,0 +1,25 @@
+# --- Secrets: never commit ---
+.env
+*.env
+
+# --- Private notes (personal details, outdated findings) ---
+CLAUDE.md
+Findings and research/
+
+# --- Broker price data (large, not ours to redistribute) ---
+data/
+
+# --- Generated output ---
+results/
+charts/
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# --- Editor / logs ---
+.vscode/
+.idea/
+*.log
