@@ -22,9 +22,9 @@ Most retail backtests look better than reality because of small shortcuts. This 
 - **Look-ahead test.** A full audit found and fixed **six bugs** where the code had been using prices that hadn't happened yet. `test_pipeline.py --truncation` now proves they're gone: it takes real setups, deletes every candle that hadn't closed at the moment of entry, rebuilds each setup from scratch and checks the answer is identical.
 - **A testing protocol fixed in advance.** Development used 2019–2024 only. 2025 onwards was held back until the strategy was locked (apart from a handful of days reviewed before that rule existed, which are logged), with pass criteria agreed before the run.
 
-## Results
+## Case study: what the tool found
 
-The honest answer is that this strategy has **no demonstrated edge**, and the tool is what proved it.
+The tool was used to test a real intraday gold strategy. The honest answer is that the strategy has **no demonstrated edge**, and the tool is what proved it.
 
 | Test | Average per trade | Profit factor | Verdict |
 |---|---|---|---|
