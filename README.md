@@ -2,7 +2,7 @@
 
 A Python research tool that finds a specific intraday trading setup in years of 1-minute gold data, then simulates every trade minute by minute (with spread, conservative fills and built-in tests that prove it isn't "seeing the future").
 
-It **only reads data**. It never places trades.
+It **only reads data**. It never places trades. The gold setup shown here is an example from my own research; client projects use the client's own strategy rules.
 
 **Speed:** one full year of 1-minute gold data (354,801 candles) → **1,459 setups detected and simulated in about 3 minutes** on a modest 2-core machine. Loading the data takes about 5 seconds of that.
 
@@ -23,6 +23,8 @@ Most retail backtests look better than reality because of small shortcuts. This 
 - **A testing protocol fixed in advance.** Development used 2019–2024 only. 2025 onwards was held back until the strategy was locked (apart from a handful of days reviewed before that rule existed, which are logged), with pass criteria agreed before the run.
 
 ## Case study: what the tool found
+
+> **Note:** The strategies below are examples from my own research, used to show how the tool works. They are **not** what a client gets. When I backtest a client's strategy, I code **their** rules and run them through the same minute-by-minute simulator, cost model and look-ahead tests.
 
 The tool was used to test a real intraday gold strategy. The honest answer is that the strategy has **no demonstrated edge**, and the tool is what proved it.
 
