@@ -69,7 +69,8 @@ def alternate(pivots, replaced=None):
             better = p["price"] > out[-1]["price"] if p["kind"] == "high" else p["price"] < out[-1]["price"]
             if better:
                 if replaced is not None:
-                    replaced.append({**out[-1], "replaced_at": p["known_time"]})
+                    prev = out[-2]["price"] if len(out) >= 2 else np.nan
+                    replaced.append({**out[-1], "replaced_at": p["known_time"], "prev_price": prev})
                 out[-1] = p
         else:
             out.append(p)
@@ -135,14 +136,23 @@ def leg_points(legs, tf, thr_for):
     return pts
 
 
-def swing_points(piv, tf, thr_for):
+def swing_points(piv, tf, thr_for, gone=()):
+    """`gone`: pivots later replaced by a more extreme one. The swing that moved far enough
+    AWAY from p may be one of those; the final list only keeps its replacement, which was
+    confirmed later, so using only that delayed the level's qualification in hindsight."""
     pts = []
     for k in range(1, len(piv)):
         p = piv[k]
         arrive = abs(p["price"] - piv[k - 1]["price"]) >= thr_for(p)
         times = [p["known_time"]] if arrive else []
-        if k + 1 < len(piv) and abs(piv[k + 1]["price"] - p["price"]) >= thr_for(p):
-            times.append(piv[k + 1]["known_time"])
+        if k + 1 < len(piv):
+            nxt = piv[k + 1]
+            away = [q for q in gone if q["kind"] == nxt["kind"] and p["known_time"] < q["known_time"] < nxt["known_time"]
+                    and q["idx"] > p["idx"]]
+            away.append(nxt)
+            hit = [q["known_time"] for q in away if abs(q["price"] - p["price"]) >= thr_for(p)]
+            if hit:
+                times.append(min(hit))
         if times:
             pts.append({"tf": tf, "kind": p["kind"], "level": p["price"], "time": p["time"],
                         "known_time": p["known_time"], "qual_time": max(min(times), p["known_time"]),
@@ -177,26 +187,33 @@ def add_sweep(point, sweeper, atr_of):
 
 def merge_equal(points, sweeper, atr_of, history=None):
     """Merge near-equal unswept levels of the same timeframe and type into one at the extreme."""
+    # p only becomes a level once it has QUALIFIED, so that is the moment it can merge.
+    # Merging at its earlier known_time rewrote q's level (and so its sweep) for a stretch
+    # of time when p was not yet a level. (Found by the generic truncation test, 28 Oct.)
+    def ready(r):
+        return max(r["known_time"], r["qual_time"])
+
     out = []
-    for p in sorted(points, key=lambda r: r["known_time"]):
+    for p in sorted(points, key=ready):
+        at = ready(p)
         tol = EQUAL_TOL_ATR * atr_of(p["tf"], p["known_time"])
         merged = False
         for q in reversed(out):
             if q["tf"] != p["tf"] or q["kind"] != p["kind"] or abs(q["level"] - p["level"]) > tol:
                 continue
-            if pd.notna(q["sweep_time"]) and q["sweep_time"] <= p["known_time"]:
+            if pd.notna(q["sweep_time"]) and q["sweep_time"] <= at:
                 continue                                   # q was already swept before p existed
             # Before changing q, keep a copy of how it looked until p appeared. Without this,
             # a decision made in between sees q with p's later known_time and so cannot see
             # q at all - the future rewriting the past. (Found by the truncation test.)
             snap = dict(q)
-            snap["valid_until"] = p["known_time"]
+            snap["valid_until"] = at
             if history is not None:
                 history.append(snap)
             take_p = p["level"] > q["level"] if p["kind"] == "high" else p["level"] < q["level"]
             if take_p:
                 q["level"], q["time"] = p["level"], p["time"]
-            q["known_time"] = max(q["known_time"], p["known_time"])
+            q["known_time"] = max(q["known_time"], at)
             q["qual_time"] = max(q["known_time"], min(q["qual_time"], p["qual_time"]))
             q["merged"] += p["merged"]
             add_sweep(q, sweeper, atr_of)
@@ -277,6 +294,24 @@ def visible_pivots(piv_by_tf, tf, t):
     return now + old
 
 
+def replaced_swing_points(gone, tf, thr_for):
+    """1H/4H swing levels that were on the chart for a while and then replaced by a more
+    extreme swing of the same type. They are not trigger levels, but until replaced_at they
+    were real levels a trader could see, so the opposing-level check must count them.
+    Leaving them out let a later swing erase an earlier level from the past.
+    (Found by the generic truncation test in backtest-engine, 28 Oct 2026.)"""
+    pts = []
+    for p in gone:
+        if np.isnan(p["atr"]) or np.isnan(p["prev_price"]):
+            continue
+        if abs(p["price"] - p["prev_price"]) < thr_for(p):
+            continue                        # never big enough to count as a level
+        pts.append({"tf": tf, "kind": p["kind"], "level": p["price"], "time": p["time"],
+                    "known_time": p["known_time"], "qual_time": p["known_time"],
+                    "source": "replaced_swing", "valid_until": p["replaced_at"]})
+    return pts
+
+
 def build_levels(tfs, m5):
     """tfs: {name: candles with ATR}. Returns (points DataFrame, legs_by_tf, alternating pivots by tf)."""
     atr15_t = tfs["15M"]["time"].to_numpy()
@@ -292,7 +327,7 @@ def build_levels(tfs, m5):
         return float(atr15_v[k]) if k >= 0 else np.nan
 
     sweeper = Sweeper(m5)
-    legs_by_tf, piv_by_tf, points = {}, {}, []
+    legs_by_tf, piv_by_tf, points, ghosts = {}, {}, [], []
     for tf in LEG_TFS + SIG_TFS:
         gone = []
         piv = [p for p in alternate(raw_pivots(tfs[tf], tf), gone) if not np.isnan(p["atr"])]
@@ -306,10 +341,11 @@ def build_levels(tfs, m5):
         else:
             thr_for = lambda p, tf=tf: SWING_ATR_MULT * p["atr"]
             legs_by_tf[tf] = build_legs(piv, lambda p: 0.0)
-            points += swing_points(piv, tf, thr_for)
-    for p in points:
+            points += swing_points(piv, tf, thr_for, [q for q in gone if not np.isnan(q["atr"])])
+            ghosts += replaced_swing_points(gone, tf, thr_for)
+    for p in points + ghosts:
         add_sweep(p, sweeper, atr_of)
-    history = []
+    history = list(ghosts)
     points = merge_equal(points, sweeper, atr_of, history)
     points = classify(points, legs_by_tf)
     points = count_equal_pivots(points, piv_by_tf, atr15_at)
@@ -323,5 +359,5 @@ def build_levels(tfs, m5):
     df = df[cols].sort_values("known_time").reset_index(drop=True)
     # earlier states of merged levels, for checks that must see the past as it was
     df.attrs["history"] = pd.DataFrame(history, columns=["tf", "kind", "level", "known_time", "qual_time",
-                                                         "sweep_time", "valid_until"])
+                                                         "sweep_time", "valid_until", "source"])
     return df, legs_by_tf, piv_by_tf

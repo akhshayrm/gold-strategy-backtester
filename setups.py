@@ -45,35 +45,42 @@ def window_extreme(points, p):
     return not (q["level"] > p["level"]).any() if p["kind"] == "high" else not (q["level"] < p["level"]).any()
 
 
-def trigger_events(points, t0, t1):
+def make_event(points, kind, members):
+    """One trigger event from a cluster of sweeps of the same type."""
+    key = lambda p: (TF_RANK[p["tf"]], p["level"] if kind == "high" else -p["level"])
+    primary = max(members, key=key)
+    tfs = sorted({m["tf"] for m in members}, key=lambda x: TF_RANK[x])
+    first = min(members, key=lambda m: m["sweep_time"])
+    # sweep_time and level MUST come from the same member, or the setup claims a level
+    # was swept at a moment when price never reached it.
+    return {"sweep_time": primary["sweep_time"], "kind": kind,
+            "first_sweep_time": first["sweep_time"], "first_level": float(first["level"]),
+            "level": float(primary["level"]), "top_tf": primary["tf"], "tfs": "+".join(tfs),
+            "n_levels": len(members), "equal_level": any(m["merged"] >= 2 for m in members),
+            "window_extreme": any(window_extreme(points, m) for m in members),
+            "rank": "origin" if any(m["rank"] == "origin" for m in members) else "older",
+            "age_hours": float(primary["age_hours"])}
+
+
+def sweep_groups(points, t0, t1):
+    """Eligible sweeps between t0 and t1, by type, in time order."""
     el = points[points["eligible"] & points["sweep_time"].between(t0, t1)].copy()
-    events = []
-    for kind, g in el.groupby("kind"):
-        g = g.sort_values("sweep_time")
+    return [(kind, [p for _, p in g.sort_values("sweep_time").iterrows()]) for kind, g in el.groupby("kind")]
+
+
+def trigger_events(points, t0, t1):
+    """Clusters of sweeps as events, ignoring entries (used for charts and checks)."""
+    out = []
+    for kind, members in sweep_groups(points, t0, t1):
         cluster, last = [], None
-        for _, p in g.iterrows():
+        for p in members:
             if last is not None and (p["sweep_time"] - last) > pd.Timedelta(minutes=CLUSTER_MIN):
-                events.append((kind, cluster))
+                out.append(make_event(points, kind, cluster))
                 cluster = []
             cluster.append(p)
             last = p["sweep_time"]
         if cluster:
-            events.append((kind, cluster))
-    out = []
-    for kind, members in events:
-        key = lambda p: (TF_RANK[p["tf"]], p["level"] if kind == "high" else -p["level"])
-        primary = max(members, key=key)
-        tfs = sorted({m["tf"] for m in members}, key=lambda x: TF_RANK[x])
-        first = min(members, key=lambda m: m["sweep_time"])
-        # sweep_time and level MUST come from the same member, or the setup claims a level
-        # was swept at a moment when price never reached it.
-        out.append({"sweep_time": primary["sweep_time"], "kind": kind,
-                    "first_sweep_time": first["sweep_time"], "first_level": float(first["level"]),
-                    "level": float(primary["level"]), "top_tf": primary["tf"], "tfs": "+".join(tfs),
-                    "n_levels": len(members), "equal_level": any(m["merged"] >= 2 for m in members),
-                    "window_extreme": any(window_extreme(points, m) for m in members),
-                    "rank": "origin" if any(m["rank"] == "origin" for m in members) else "older",
-                    "age_hours": float(primary["age_hours"])})
+            out.append(make_event(points, kind, cluster))
     return sorted(out, key=lambda e: e["sweep_time"])
 
 
@@ -252,8 +259,41 @@ def take_profits(kind, entry_price, entry_time, tfs, piv_by_tf, atr15):
 
 
 def build_setups(points, tfs, legs_by_tf, piv_by_tf, fvgs, t0, t1):
+    """Setups from clusters of sweeps.
+
+    A later sweep joins a cluster (and can become its primary level) only if it happened
+    before the cluster's own entry. Otherwise the entry was already taken in real time, and
+    letting the later sweep redefine the event erased a trade that a live trader would have
+    seen. The later sweep then starts a new cluster. (Found by the generic truncation test
+    in backtest-engine, 28 Oct 2026.)
+    """
     rows = []
-    for ev in trigger_events(points, t0, t1):
+    for kind, members in sweep_groups(points, t0, t1):
+        cluster, last, row = [], None, None
+        for p in members:
+            if last is not None:
+                gap = (p["sweep_time"] - last) > pd.Timedelta(minutes=CLUSTER_MIN)
+                # the 5M candle holding p's sweep must have CLOSED before the entry to count
+                done = row is not None and row["entry_time"] < p["sweep_time"] + pd.Timedelta(minutes=5)
+                if gap or done:
+                    if row is not None:
+                        rows.append(row)
+                    cluster = []
+            cluster.append(p)
+            last = p["sweep_time"]
+            row = setup_for(make_event(points, kind, cluster), points, tfs, legs_by_tf, piv_by_tf, fvgs)
+        if row is not None:
+            rows.append(row)
+    rows.sort(key=lambda r: r["sweep_time"])
+    df_out = pd.DataFrame(rows)
+    if not df_out.empty:
+        df_out.insert(0, "id", range(1, len(df_out) + 1))
+    return df_out
+
+
+def setup_for(ev, points, tfs, legs_by_tf, piv_by_tf, fvgs):
+    """The setup (one dict) for one trigger event, or None."""
+    if True:                                  # (kept indented: the body is the old loop body)
         kind = ev["kind"]
         trade = "short" if kind == "high" else "long"
         trade_dir = -1 if trade == "short" else 1
@@ -272,7 +312,7 @@ def build_setups(points, tfs, legs_by_tf, piv_by_tf, fvgs, t0, t1):
             if best is None or entry_time < best[0]:
                 best = (entry_time, etf, g)
         if best is None:
-            continue
+            return None
         entry_time, etf, g = best
         df, minutes = tfs[etf], TF_MINUTES[etf]
         i = _idx(df, g["invert_time"])
@@ -281,7 +321,7 @@ def build_setups(points, tfs, legs_by_tf, piv_by_tf, fvgs, t0, t1):
         anchor = float(df["high"].to_numpy()[s:i + 1].max() if kind == "high" else df["low"].to_numpy()[s:i + 1].min())
         risk = abs(anchor - entry)
         if risk <= 0:
-            continue
+            return None
         closed15 = int(np.searchsorted(tfs["15M"]["time"].to_numpy(),
                                        np.datetime64(entry_time - pd.Timedelta(minutes=15)), side="right"))
         atr15 = float(tfs["15M"]["atr"].iat[max(closed15 - 1, 0)])
@@ -305,7 +345,7 @@ def build_setups(points, tfs, legs_by_tf, piv_by_tf, fvgs, t0, t1):
         opp.update(opposing_fvg(fvgs, kind, entry, entry_time, risk))
         tp1_dist = abs(tps[0] - entry) / risk if not np.isnan(tps[0]) else np.nan
 
-        rows.append({
+        return {
             **opp, "tp1_dist_R": round(tp1_dist, 2) if not np.isnan(tp1_dist) else np.nan,
             "sweep_time": ev["sweep_time"], "sweep_minute": sweep_minute, "trade": trade,
             "equal_level": ev["equal_level"], "level": ev["level"], "top_tf": ev["top_tf"],
@@ -326,8 +366,4 @@ def build_setups(points, tfs, legs_by_tf, piv_by_tf, fvgs, t0, t1):
             "tp1": tps[0], "tp2": tps[1], "tp3": tps[2],
             "rr1": rr[0], "rr2": rr[1], "rr3": rr[2],
             "entryB_time": b_time, "entryB_price": b_price, "entryC_time": c_time, "entryC_price": c_price,
-        })
-    df_out = pd.DataFrame(rows)
-    if not df_out.empty:
-        df_out.insert(0, "id", range(1, len(df_out) + 1))
-    return df_out
+        }

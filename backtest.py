@@ -139,7 +139,9 @@ def generate(m5_all, m1_all, t0, t1):
         stop = min(start + pd.Timedelta(days=CHUNK_DAYS), t1)
         m5 = m5_all[(m5_all["time"] >= start - pd.Timedelta(days=WARMUP_DAYS)) &
                     (m5_all["time"] < stop + pd.Timedelta(days=2))].reset_index(drop=True)
-        m1 = m1_all[(m1_all["time"] >= start - pd.Timedelta(days=2)) &
+        # 5 days back, so the "enough 1M data" check never depends on candles after the
+        # signal (after a weekend or holiday, 2 days back held too few in short windows)
+        m1 = m1_all[(m1_all["time"] >= start - pd.Timedelta(days=5)) &
                     (m1_all["time"] < stop + pd.Timedelta(days=2))].reset_index(drop=True)
         if len(m5) > 500:
             tfs = build_timeframes(m5, m1 if len(m1) > 500 else None)

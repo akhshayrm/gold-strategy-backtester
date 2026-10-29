@@ -4,7 +4,7 @@ A Python research tool that finds a specific intraday trading setup in years of 
 
 It **only reads data**. It never places trades. The gold setup shown here is an example from my own research; client projects use the client's own strategy rules.
 
-**Speed:** one full year of 1-minute gold data (354,801 candles) → **1,459 setups detected and simulated in about 3 minutes** on a modest 2-core machine. Loading the data takes about 5 seconds of that.
+**Speed:** one full year of 1-minute gold data (354,801 candles) → **1,696 setups detected and simulated in under 4 minutes** on a modest 2-core machine. Loading the data takes about 5 seconds of that.
 
 ![Example day: six setups detected on gold, 13 June 2024](docs/example-setups-2024-06-13.png)
 *One day of detected setups on the 5-minute chart. ★ = liquidity sweep, box = inversion gap (the confirmation), ◆ = entry, dark red dotted = stop, grey dotted = take-profit targets 1–3.*
@@ -19,7 +19,8 @@ Most retail backtests look better than reality because of small shortcuts. This 
 - **Worst case when unsure.** If one candle touches both the stop and a target, the **stop** is counted first.
 - **Real costs.** The broker's recorded spread is paid on every trade (a fixed $0.33 is assumed for years where the broker didn't record it). Stops and targets are checked on the correct side of the spread.
 - **No free wins.** A trade still open when the data ends is dropped, not counted as a winner.
-- **Look-ahead test.** A full audit found and fixed **six bugs** where the code had been using prices that hadn't happened yet. `test_pipeline.py --truncation` now proves they're gone: it takes real setups, deletes every candle that hadn't closed at the moment of entry, rebuilds each setup from scratch and checks the answer is identical.
+- **Look-ahead test.** Two audits have found and fixed **nine bugs** where the code had been using prices that hadn't happened yet. `test_pipeline.py --truncation` proves they're gone: it takes real setups, deletes every candle that hadn't closed at the moment of entry, rebuilds each setup from scratch and checks the answer is identical. It also checks the reverse — that a setup visible at the time doesn't disappear once later data is added.
+- **A known limit, stated up front.** Sweeps are detected on 5-minute candles, so a sweep falling inside the same 5-minute candle as the entry can land either side of it. About 1% of sampled setups are affected, on one optional filter column. It's logged rather than quietly fixed, because fixing it means detecting sweeps on 1-minute data and re-running everything.
 - **A testing protocol fixed in advance.** Development used 2019–2024 only. 2025 onwards was held back until the strategy was locked (apart from a handful of days reviewed before that rule existed, which are logged), with pass criteria agreed before the run.
 
 ## Case study: what the tool found
@@ -28,16 +29,24 @@ Most retail backtests look better than reality because of small shortcuts. This 
 
 The tool was used to test a real intraday gold strategy. The honest answer is that the strategy has **no demonstrated edge**, and the tool is what proved it.
 
-| Test | Average per trade | Profit factor | Verdict |
-|---|---|---|---|
-| Raw strategy, gold, 2024 (1,459 trades) | −0.054R | 0.92 | Losing |
-| Locked strategy (with filter and "rule B" management), gold, 2025–26 holdout (567 trades) | 0.000R | 1.00 | Break-even, no edge |
+| Test | Trades | Average per trade | Profit factor | Verdict |
+|---|---|---|---|---|
+| Raw strategy, gold, 2024 | 1,696 | −0.102R | 0.85 | Losing |
+| Raw strategy, gold, 2019–2024 (development) | 9,637 | −0.172R | 0.74 | Losing |
+| Locked strategy (filter + "rule B"), **development** | 2,685 | +0.303R | 1.39 | Looks good — on data it was built from |
+| Locked strategy, **gold 2025–26 holdout** (the real test) | 776 | −0.173R | 0.80 | **Fails, significantly (p 0.04)** |
 
 *The filter keeps a setup only when an untouched opposing level from the 30-minute chart or higher sits closer than the first target. "Rule B" holds through TP1, moves the stop to break-even at TP2 and closes at TP3. Both were fixed before the holdout was run.*
 
+The last two rows are the point of the whole project: a filter found in the development data scores a profit factor of 1.39 there and 0.80 on data it had never seen. That is what overfitting looks like, and a backtest without a held-back period would have shown only the 1.39.
+
 ![Cumulative result of the raw strategy on gold in 2024](docs/example-equity-2024.png)
 
-**The look-ahead audit in action.** A second idea, "SMT divergence" (a sweep that a correlated market fails to confirm), first appeared to work on three out of three market pairs. The audit showed that the test checked the other market for up to 30 minutes after the sweep, about 20 minutes past the entry, so it was using information a trader wouldn't have had yet. With that fixed, the effect **reverses on all three**:
+*The chart above is from an earlier run of the same raw strategy on 2024; the shape is unchanged but the exact figures in the table are from the current code.*
+
+**The look-ahead audit in action (1): the test that wasn't strict enough.** The truncation test above originally ran on a fixed list of 12 days, and passed. Re-running the same test on **random** days instead found three further real bugs — the worst of which let a liquidity sweep that happened *after* a trade was entered redefine the setup and delete a trade a live trader would already have taken. Fixing it changed the development trade count from 8,544 to 9,637 and made every result slightly worse. The lesson is in the repo now: random days, several seeds, both directions of the test.
+
+**The look-ahead audit in action (2).** A second idea, "SMT divergence" (a sweep that a correlated market fails to confirm), first appeared to work on three out of three market pairs. The audit showed that the test checked the other market for up to 30 minutes after the sweep, about 20 minutes past the entry, so it was using information a trader wouldn't have had yet. With that fixed, the effect **reverses on all three**:
 
 | Pair (traded / confirming) | Divergent, fixed | Confirmed, fixed | With the bug: divergent vs confirmed |
 |---|---|---|---|
