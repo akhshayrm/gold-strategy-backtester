@@ -14,13 +14,18 @@ Rules compared (all use one entry, all close at TP3):
 """
 import argparse
 import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
+sys.path.insert(0, ROOT)
 
 import numpy as np
 import pandas as pd
 
 from backtest import LOT, MAX_HOURS, spread_at
+from swings import file_stem
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = ROOT
 
 # for each rule: what the stop becomes after TP1, and after TP2.
 # "keep" = leave it, "be" = break-even (the entry), "tp1" = the TP1 price
@@ -96,8 +101,8 @@ def main():
     args = p.parse_args()
 
     d = pd.read_csv(args.trades, parse_dates=["entry_time"])
-    m5 = pd.read_csv(os.path.join(args.data_dir, "XAUUSD_vx_M5.csv"), parse_dates=["time"])
-    m1 = pd.read_csv(os.path.join(args.data_dir, "XAUUSD_vx_M1.csv"), parse_dates=["time"],
+    m5 = pd.read_csv(os.path.join(args.data_dir, f"{file_stem()}_M5.csv"), parse_dates=["time"])
+    m1 = pd.read_csv(os.path.join(args.data_dir, f"{file_stem()}_M1.csv"), parse_dates=["time"],
                      usecols=["time", "open", "high", "low", "close"])
     spreads = [spread_at(m5, t) for t in d["entry_time"]]
 

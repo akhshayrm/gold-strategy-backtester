@@ -1,5 +1,7 @@
 # Gold (XAUUSD) Strategy Backtester
 
+[![tests](https://github.com/akhshayrm/gold-strategy-backtester/actions/workflows/tests.yml/badge.svg)](https://github.com/akhshayrm/gold-strategy-backtester/actions/workflows/tests.yml)
+
 A Python research tool that finds a specific intraday trading setup in years of 1-minute gold data, then simulates every trade minute by minute (with spread, conservative fills and built-in tests that prove it isn't "seeing the future").
 
 It **only reads data**. It never places trades. The gold setup shown here is an example from my own research; client projects use the client's own strategy rules.
@@ -19,7 +21,7 @@ Most retail backtests look better than reality because of small shortcuts. This 
 - **Worst case when unsure.** If one candle touches both the stop and a target, the **stop** is counted first.
 - **Real costs.** The broker's recorded spread is paid on every trade (a fixed $0.33 is assumed for years where the broker didn't record it). Stops and targets are checked on the correct side of the spread.
 - **No free wins.** A trade still open when the data ends is dropped, not counted as a winner.
-- **Look-ahead test.** Two audits have found and fixed **nine bugs** where the code had been using prices that hadn't happened yet. `test_pipeline.py --truncation` proves they're gone: it takes real setups, deletes every candle that hadn't closed at the moment of entry, rebuilds each setup from scratch and checks the answer is identical. It also checks the reverse — that a setup visible at the time doesn't disappear once later data is added.
+- **Look-ahead test.** Two audits have found and fixed **nine bugs** where the code had been using prices that hadn't happened yet. `test_pipeline.py --truncation` checks they're gone: it takes real setups, deletes every candle that hadn't closed at the moment of entry, rebuilds each setup from scratch and checks the answer is identical. It also checks the reverse — that a setup visible at the time doesn't disappear once later data is added.
 - **A known limit, stated up front.** Sweeps are detected on 5-minute candles, so a sweep falling inside the same 5-minute candle as the entry can land either side of it. About 1% of sampled setups are affected, on one optional filter column. It's logged rather than quietly fixed, because fixing it means detecting sweeps on 1-minute data and re-running everything.
 - **A testing protocol fixed in advance.** Development used 2019–2024 only. 2025 onwards was held back until the strategy was locked (apart from a handful of days reviewed before that rule existed, which are logged), with pass criteria agreed before the run.
 
@@ -54,7 +56,7 @@ The last two rows are the point of the whole project: a filter found in the deve
 | Dow / S&P 500 | −0.015R | −0.005R | +0.024R vs −0.027R |
 | Gold / Silver | −0.092R | −0.069R | −0.047R vs −0.100R |
 
-*Each pair: about 7,000–8,700 sweeps, Sep 2024 to Oct 2026, 0.25 price-unit round-trip cost.* `python smt_test.py ... --lookahead` switches the old bug back on, so both versions can be checked side by side.
+*Each pair: about 7,000–8,700 sweeps, Sep 2024 to Oct 2026, 0.25 price-unit round-trip cost.* `python experiments\smt_test.py ... --lookahead` switches the old bug back on, so both versions can be checked side by side.
 
 *R = multiples of the amount risked on a trade. +1R means the trade won as much as it risked.*
 
@@ -73,36 +75,47 @@ The last two rows are the point of the whole project: a filter found in the deve
 | `setups.py` | Combines a sweep with an inversion-gap confirmation into a setup |
 | `backtest.py` | Minute-by-minute trade simulation and the results report |
 | `test_pipeline.py` | Unit tests plus the look-ahead truncation test |
-| `smt_test.py` | SMT divergence test for any pair of instruments |
-| `locked_check.py` | Re-scores the locked strategy on a trades file |
-| `management_test.py` | Compares trade-management rules on the same trades |
-| `prop_eval.py` | Simulates prop-firm evaluation rules (drawdown, daily limit, target) |
-| `delay_test.py`, `entry_test.py` | Pre-registered entry-timing experiments |
+| `experiments\smt_test.py` | SMT divergence test for any pair of instruments |
+| `experiments\locked_check.py` | Re-scores the locked strategy on a trades file |
+| `experiments\management_test.py` | Compares trade-management rules on the same trades |
+| `experiments\prop_eval.py` | Simulates prop-firm evaluation rules (drawdown, daily limit, target) |
+| `experiments\delay_test.py`, `experiments\entry_test.py` | Pre-registered entry-timing experiments |
 | `*_charts.py`, `blind_review.py` | Review charts, including "blind" charts that stop at the entry for unbiased labelling |
 
 ## Setup
 
 Requires Python 3.10+.
 
-```powershell
+```
 python -m venv .venv
-.\.venv\Scripts\activate
+.venv\Scripts\activate.bat
 pip install -r requirements.txt
 ```
 
 ### Get the data
 Price data is **not included** (it comes from a broker). To download your own, open the MetaTrader 5 desktop terminal (Windows), log in, then run:
 
-```powershell
-$env:AGENT_SYMBOL = "XAUUSD"         # your broker's symbol name for gold
+```
+set AGENT_SYMBOL=XAUUSD              & rem your broker's symbol name for gold
 python download_history.py           # full history into data/
 python download_history.py --update  # add the newest candles
 ```
 
 Set `AGENT_SYMBOL` in the same window before running any script, so every script reads the same files (`data/XAUUSD_M1.csv` and `data/XAUUSD_M5.csv` in this example). Any CSV with the columns `time,open,high,low,close,tick_volume,spread,real_volume` works, so data from other sources can be used too.
 
+### Demo on synthetic data
+No broker account needed. This makes a small **synthetic** random-walk dataset in `sample/` and runs the backtester on it, to check that your install works:
+
+```
+set AGENT_SYMBOL=XAUUSD.vx
+python make_sample_data.py
+python backtest.py --data-dir sample --from 2024-03-04 --to 2024-03-15 --label sample
+```
+
+The prices are random, so the results (a clear loss) mean nothing. Do not read anything about the strategy from them.
+
 ### Run
-```powershell
+```
 python test_pipeline.py                                          # fast unit tests (seconds)
 python test_pipeline.py --truncation                             # look-ahead test on real data (minutes)
 python backtest.py --from 2024-01-01 --to 2024-12-31 --label 2024

@@ -14,6 +14,10 @@ Costs: 0.86 index points, Topstep's real MNQ round trip (0.25 spread + $1.22 com
 """
 import argparse
 import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
+sys.path.insert(0, ROOT)
 
 import numpy as np
 import pandas as pd
@@ -23,7 +27,7 @@ from detectors import TF_MINUTES, build_timeframes, find_fvgs
 from setups import find_ifvg
 from smt_test import replay
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = ROOT
 COST = 0.86
 CHUNK_MONTHS = 4
 

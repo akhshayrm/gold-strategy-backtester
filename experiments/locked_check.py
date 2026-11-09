@@ -6,6 +6,10 @@ Used to compare results before and after the look-ahead fixes. Reads only.
 """
 import argparse
 import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
+sys.path.insert(0, ROOT)
 
 import numpy as np
 import pandas as pd

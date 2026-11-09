@@ -16,11 +16,15 @@ together and the daily loss limit means something.
 """
 import argparse
 import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
+sys.path.insert(0, ROOT)
 
 import numpy as np
 import pandas as pd
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = ROOT
 
 
 def load_days(path, r_col="R"):

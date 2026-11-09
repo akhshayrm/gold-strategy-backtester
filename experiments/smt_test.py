@@ -23,6 +23,10 @@ Trades (identical for both groups, so the only difference is the divergence labe
 """
 import argparse
 import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
+sys.path.insert(0, ROOT)
 
 import numpy as np
 import pandas as pd
@@ -32,7 +36,7 @@ from detectors import add_atr
 from levels import build_levels, visible_pivots
 from swings import find_swings, resample
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = ROOT
 SWING_N = 2             # candles either side, on the 15M
 SWING_TOL = 30          # minutes apart two swings may be and still count as the same point
 SWEEP_WINDOW = 30       # minutes either side in which the other index may confirm

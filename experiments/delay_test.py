@@ -27,6 +27,10 @@ PRE-REGISTRATION - written before running it, not to be edited after:
 """
 import argparse
 import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo root
+sys.path.insert(0, ROOT)
 
 import numpy as np
 import pandas as pd
@@ -34,7 +38,7 @@ from scipy import stats
 
 from smt_test import replay
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = ROOT
 DELAY = 3
 COST = 0.86
 DEV_END = pd.Timestamp("2026-01-01")
